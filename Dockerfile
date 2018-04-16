@@ -1,25 +1,46 @@
+#
+# Builder
+#
+FROM abiosoft/caddy:builder as builder
+
+ARG version="0.10.12"
+ARG plugins="expires,cors"
+
+# process wrapper
+RUN go get -v github.com/abiosoft/parent
+
+RUN VERSION=${version} PLUGINS=${plugins} /bin/sh /usr/bin/builder.sh
+
+#
+# Final stage
+#
 FROM alpine:3.7
 MAINTAINER FactAi <github@fact.ai>
 
-LABEL caddy_version="0.10.11" architecture="amd64"
+ARG version="0.10.12"
+LABEL caddy_version="$version"
 
-ARG plugins=http.expires,http.git,http.cors
+# Let's Encrypt Agreement
+ENV ACME_AGREE="false"
 
-RUN apk add --no-cache openssh-client git tar curl
+RUN apk add --no-cache openssh-client git
 
-RUN curl --silent --show-error --fail --location \
-      --header "Accept: application/tar+gzip, application/x-gzip, application/octet-stream" -o - \
-      "https://caddyserver.com/download/linux/amd64?plugins=${plugins}" \
-    | tar --no-same-owner -C /usr/bin/ -xz caddy \
- && chmod 0755 /usr/bin/caddy \
- && /usr/bin/caddy -version
+# install caddy
+COPY --from=builder /install/caddy /usr/bin/caddy
+
+# validate install
+RUN /usr/bin/caddy -version
+RUN /usr/bin/caddy -plugins
 
 EXPOSE 80 443 2015
-VOLUME /root/.caddy
+VOLUME /root/.caddy /srv
 WORKDIR /srv
 
 COPY Caddyfile /etc/Caddyfile
 COPY index.html /srv/index.html
 
-ENTRYPOINT ["/usr/bin/caddy"]
-CMD ["--conf", "/etc/Caddyfile", "--log", "stdout"]
+# install process wrapper
+COPY --from=builder /go/bin/parent /bin/parent
+
+ENTRYPOINT ["/bin/parent", "caddy"]
+CMD ["--conf", "/etc/Caddyfile", "--log", "stdout", "--agree=$ACME_AGREE"]
